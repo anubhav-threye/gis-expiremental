@@ -3,35 +3,13 @@ from bpy import context
 from mathutils import Vector
 import time
 
-building_name = 'VAr_1_New house'
-
-#import Terrain from blosm
-def import_terrain():
-    try:
-        minLat = 34.072  
-        maxLat = 34.2161
-        minLon = 77.454
-        maxLon = 77.628
-
-        scenes = bpy.data.scenes
-        
-        blosm = scenes['Scene'].blosm
-
-        blosm.minLat = float(minLat)
-        blosm.maxLat = float(maxLat)
-        blosm.minLon = float(minLon)
-        blosm.maxLon = float(maxLon)
-        
-        # Calling Terrain
-        blosm.dataType = 'terrain'
-        bpy.ops.blosm.import_data()
-    except Exception as e:
-        print(e)
+building_name = 'Var_2 New house'
+global_counter = 0  # Global incremental counter
 
 def cleanup():
-    terrain_tiles = [obj for obj in bpy.context.scene.objects if obj.name.startswith("Terrain")]
-    for terrain in terrain_tiles:
-        bpy.data.objects.remove(terrain)
+    # terrain_tiles = [obj for obj in bpy.context.scene.objects if obj.name.startswith("Terrain")]
+    # for terrain in terrain_tiles:
+    #     bpy.data.objects.remove(terrain)
     
     building = bpy.data.objects[building_name]
     bpy.data.objects.remove(building)
@@ -44,12 +22,47 @@ def bbox_axes(ob):
     bb = list(bbox(ob))
     return tuple(bb[i] for i in (0, 4, 3, 1))
 
-def newobj(bm, original):
-    me = bpy.data.meshes.new(original.name)
-    bm.to_mesh(me)
-    ob = bpy.data.objects.new(original.name, me)
+def newobj(bm, original, i, j, center_x, center_y):
+    global global_counter
     
-    # Copy materials from the original object
+    # Calculate UDIM suffix (8x8 groups from 16x16 grid)
+    group_i = i // 2
+    group_j = j // 2
+    udim_suffix = 1001 + group_i + group_j * 10
+    
+    # Determine quadrant based on tile's center relative to world origin
+    if center_x < 0:
+        x_quadrant = "left"
+    else:
+        x_quadrant = "right"
+        
+    if center_y < 0:
+        y_quadrant = "bottom"
+    else:
+        y_quadrant = "top"
+    
+    # Map to quadrant numbers (1-4)
+    quadrant = 1
+    if x_quadrant == "left" and y_quadrant == "bottom":
+        quadrant = 1
+    elif x_quadrant == "left" and y_quadrant == "top":
+        quadrant = 2
+    elif x_quadrant == "right" and y_quadrant == "bottom":
+        quadrant = 3
+    elif x_quadrant == "right" and y_quadrant == "top":
+        quadrant = 4
+    
+    # Increment global counter
+    global_counter += 1
+    
+    # Generate unique name
+    name = f"{original.name}_{global_counter}_{quadrant}_{udim_suffix}"
+    
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    ob = bpy.data.objects.new(name, me)
+    
+    # Copy materials
     for mat in original.data.materials:
         ob.data.materials.append(mat)
         
@@ -82,6 +95,10 @@ def slice_building(building, planes_x, planes_y):
             p0_y = planes_y[j]
             p1_y = planes_y[j+1]
 
+            # Calculate tile's center
+            center_x = (p0_x + p1_x) / 2
+            center_y = (p0_y + p1_y) / 2
+
             # Create working copy of the mesh
             bm = bmo.copy()
 
@@ -110,7 +127,8 @@ def slice_building(building, planes_x, planes_y):
             )
 
             if len(bm.verts) > 0:
-                new_obj = newobj(bm, building)
+                new_obj = newobj(bm, building, i, j, center_x, center_y)
+                # new_obj = newobj(bm, building, i, j)  # Pass i and j for UDIM
                 created_objects.append(new_obj)
 
     return created_objects
@@ -195,7 +213,7 @@ def slice_terrain_and_buildings(ob):
     return all_created_objects  # Return both terrain and building objects
 
 
-import_terrain()
+# import_terrain()
 
 # Main slicing procedure
 ob = bpy.data.objects["Terrain"]  # Assuming the terrain object is currently selected
