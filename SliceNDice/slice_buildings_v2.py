@@ -5,7 +5,7 @@ import time
 
 building_name = 'Var_2 New house'
 global_counter = 0  # Global incremental counter
-
+terrain_bbox = (Vector((-7999.99951171875, -8000.00048828125, 1.1615668535232544)), Vector((8000.0, -8000.00048828125, 1.1615668535232544)), Vector((-7999.99951171875, 8000.0, 1.1615668535232544)), Vector((-7999.99951171875, -8000.00048828125, 1516.09326171875)))
 def cleanup():
     # terrain_tiles = [obj for obj in bpy.context.scene.objects if obj.name.startswith("Terrain")]
     # for terrain in terrain_tiles:
@@ -28,7 +28,8 @@ def newobj(bm, original, i, j, center_x, center_y):
     # Calculate UDIM suffix (8x8 groups from 16x16 grid)
     group_i = i // 2
     group_j = j // 2
-    udim_suffix = 1001 + group_i + group_j * 10
+    # udim_suffix = 1001 + group_i + group_j * 10
+    udim_suffix = 1001 + (7 - group_i) * 10 + group_j # CCW rotation
     
     # Determine quadrant based on tile's center relative to world origin
     if center_x < 0:
@@ -69,15 +70,31 @@ def newobj(bm, original, i, j, center_x, center_y):
     bpy.context.collection.objects.link(ob)
     return ob
 
-def find_intersecting_buildings(ob, terrain_bbox_axes):
+def find_intersecting_buildings(terrain_bbox_axes):
     intersecting_buildings = []
+    # Extract terrain's min/max (assuming terrain_bbox_axes uses specific corners)
+    terrain_min = terrain_bbox_axes[0]
+    terrain_max_x = terrain_bbox_axes[1].x
+    terrain_max_y = terrain_bbox_axes[2].y
+    terrain_max_z = terrain_bbox_axes[3].z
+
     for obj in bpy.context.scene.objects:
-        if obj.name == building_name:  # Exclude terrain object
+        if obj.name == building_name:  # Adjust condition as needed
             obj_bbox = list(bbox(obj))
-            if (
-                obj_bbox[0].x < terrain_bbox_axes[1].x and obj_bbox[1].x > terrain_bbox_axes[0].x and
-                obj_bbox[0].y < terrain_bbox_axes[2].y and obj_bbox[1].y > terrain_bbox_axes[0].y
-            ):
+            # Calculate object's min/max for each axis
+            obj_min_x = min(v.x for v in obj_bbox)
+            obj_max_x = max(v.x for v in obj_bbox)
+            obj_min_y = min(v.y for v in obj_bbox)
+            obj_max_y = max(v.y for v in obj_bbox)
+            obj_min_z = min(v.z for v in obj_bbox)
+            obj_max_z = max(v.z for v in obj_bbox)
+
+            # Check overlap on all axes
+            overlap_x = (obj_min_x < terrain_max_x) and (obj_max_x > terrain_min.x)
+            overlap_y = (obj_min_y < terrain_max_y) and (obj_max_y > terrain_min.y)
+            overlap_z = (obj_min_z < terrain_max_z) and (obj_max_z > terrain_min.z)
+
+            if overlap_x and overlap_y and overlap_z:
                 intersecting_buildings.append(obj)
     return intersecting_buildings
 
@@ -133,8 +150,8 @@ def slice_building(building, planes_x, planes_y):
 
     return created_objects
 
-def slice_terrain_and_buildings(ob):
-    terrain_bbox = bbox_axes(ob)
+def slice_terrain_and_buildings():
+    # terrain_bbox = bbox_axes(ob)
     print("Bounding box: ", terrain_bbox)
     x_segments = 16  # 16 slices along the X axis
     y_segments = 16  # 16 slices along the Y axis
@@ -199,7 +216,7 @@ def slice_terrain_and_buildings(ob):
     #             terrain_created_objects.append(new_obj)
 
     # Slice buildings that intersect with the terrain
-    intersecting_buildings = find_intersecting_buildings(ob, terrain_bbox)
+    intersecting_buildings = find_intersecting_buildings(terrain_bbox)
     all_created_objects = []
     for building in intersecting_buildings:
         created_objects = slice_building(building, x_planes[:], y_planes[:])
@@ -216,6 +233,6 @@ def slice_terrain_and_buildings(ob):
 # import_terrain()
 
 # Main slicing procedure
-ob = bpy.data.objects["Terrain"]  # Assuming the terrain object is currently selected
-slice_terrain_and_buildings(ob)
+# ob = bpy.data.objects["Terrain"]  # Assuming the terrain object is currently selected
+slice_terrain_and_buildings()
 cleanup()
