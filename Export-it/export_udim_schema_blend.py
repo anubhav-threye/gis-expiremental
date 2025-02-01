@@ -56,53 +56,67 @@ def calculate_udim_quadrant(obj):
     return new_quadrant, udim
 
 def export_object(obj, quadrant, udim):
-    """Export object to the appropriate blend file."""
+    """Export object to the appropriate blend file, appending to existing files."""
     filename = f"{quadrant}_{udim}.blend"
     filepath = bpy.path.abspath(os.path.join(output_dir, filename))
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-    # Save the object's transform
-    original_location = obj.location.copy()
-    original_rotation = obj.rotation_euler.copy()
-    original_scale = obj.scale.copy()
 
-    # Create a new temporary scene and collection
-    collection_name = f"{quadrant}_{udim}"
-    export_collection = bpy.data.collections.new(collection_name)
-    temp_scene = bpy.data.scenes.new(f"TEMP_SCENE_{quadrant}_{udim}")
+    # Create a temporary collection to manage exports
+    temp_collection = bpy.data.collections.new("TEMP_EXPORT")
+    bpy.context.scene.collection.children.link(temp_collection)
 
-    # Link the collection to the temporary scene
-    temp_scene.collection.children.link(export_collection)
+    # Load existing data if the file exists
+    existing_objects = []
+    target_collection_name = f"{quadrant}_{udim}"
+    target_collection = None
+    temp_scene = None
 
-    # Link the object to the temporary collection
-    export_collection.objects.link(obj)
+    if os.path.exists(filepath):
+        # Load existing collection
+        with bpy.data.libraries.load(filepath, link=False) as (data_from, data_to):
+            data_to.collections = [target_collection_name] if target_collection_name in data_from.collections else []
+        
+        # Link existing collection to the temporary collection
+        for coll in data_to.collections:
+            temp_collection.children.link(coll)
+            target_collection = coll
 
-    # Collect data blocks to export
-    data_blocks = {
-        temp_scene,
-        export_collection,
-        obj,
-        obj.data,
-    }
+    # Create new collection if none exists
+    if not target_collection:
+        target_collection = bpy.data.collections.new(target_collection_name)
+        temp_collection.children.link(target_collection)
+        temp_scene = bpy.data.scenes.new(f"TEMP_SCENE_{quadrant}_{udim}")
+        temp_scene.collection.children.link(target_collection)
 
-    # Include materials and mesh data
+    # Add object to the target collection
+    target_collection.objects.link(obj)
+
+    # Collect all data blocks to save
+    data_blocks = {target_collection, obj, obj.data}
+    if temp_scene:
+        data_blocks.add(temp_scene)
     if obj.data:
         if isinstance(obj.data, bpy.types.Mesh):
             for mat_slot in obj.material_slots:
                 if mat_slot.material:
                     data_blocks.add(mat_slot.material)
 
-    # Write to blend file (only the temporary scene/collection)
+    # Include existing objects from the target collection
+    for existing_obj in target_collection.objects:
+        data_blocks.add(existing_obj)
+        if existing_obj.data:
+            data_blocks.add(existing_obj.data)
+
+    # Write all data blocks to the file
     bpy.data.libraries.write(filepath, data_blocks, fake_user=True)
 
-    # Restore the object's transform and original collection links
-    obj.location = original_location
-    obj.rotation_euler = original_rotation
-    obj.scale = original_scale
+    # temp_collection.objects.unlink(obj)
 
-    # Cleanup: Remove temporary scene and collection
-    bpy.data.scenes.remove(temp_scene)
-    bpy.data.collections.remove(export_collection)
+    # Cleanup
+    bpy.context.scene.collection.children.unlink(temp_collection)
+    bpy.data.collections.remove(temp_collection)
+
 def main():
     # Process all mesh objects in the scene
     for obj in bpy.context.scene.objects:
