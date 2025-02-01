@@ -70,7 +70,7 @@ def export_object(obj, quadrant, udim):
     existing_objects = []
     target_collection_name = f"{quadrant}_{udim}"
     target_collection = None
-    temp_scene = None
+    temp_scene = bpy.data.scenes.new(f"TEMP_SCENE_{quadrant}_{udim}")
 
     if os.path.exists(filepath):
         # Load existing collection
@@ -86,11 +86,12 @@ def export_object(obj, quadrant, udim):
     if not target_collection:
         target_collection = bpy.data.collections.new(target_collection_name)
         temp_collection.children.link(target_collection)
-        temp_scene = bpy.data.scenes.new(f"TEMP_SCENE_{quadrant}_{udim}")
-        temp_scene.collection.children.link(target_collection)
 
     # Add object to the target collection
-    target_collection.objects.link(obj)
+    if obj.name not in target_collection.objects:
+        target_collection.objects.link(obj)
+    
+    temp_scene.collection.children.link(target_collection)
 
     # Collect all data blocks to save
     data_blocks = {target_collection, obj, obj.data}
@@ -114,8 +115,12 @@ def export_object(obj, quadrant, udim):
     # temp_collection.objects.unlink(obj)
 
     # Cleanup
+    for coll in temp_scene.collection.children:
+        temp_scene.collection.children.unlink(coll)
+        bpy.data.collections.remove(coll)
     bpy.context.scene.collection.children.unlink(temp_collection)
     bpy.data.collections.remove(temp_collection)
+    bpy.data.scenes.remove(temp_scene)
 
 def main():
     # Process all mesh objects in the scene
