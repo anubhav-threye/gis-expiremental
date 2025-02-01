@@ -3,7 +3,7 @@ import bpy
 from mathutils import Vector
 
 
-mesh_base_name = 'mesh_base'
+mesh_base_name = 'Var_2_hotel_base_'
 # Configure these variables according to your grid setup
 # Terrain bounding box parameters (from original script)
 x_min = -7999.99951171875
@@ -18,6 +18,7 @@ x_step = (x_max - x_min) / x_segments  # 1000.0 units per segment
 y_step = (y_max - y_min) / y_segments  # 1000.0 units per segment
 output_dir = r"C:\Work\Threye\GIS\UDIM"  # Output directory (relative to the blend file)
 QUADRANT_MAP = {1: 2, 2: 4, 3: 1, 4: 3}
+
 def calculate_udim_quadrant(obj):
     print("Calculate UDIM and quadrant based on object's center position.")
     bbox_corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
@@ -56,76 +57,55 @@ def calculate_udim_quadrant(obj):
     return new_quadrant, udim
 
 def export_object(obj, quadrant, udim):
-    """Export object to the appropriate blend file, appending to existing files."""
     filename = f"{quadrant}_{udim}.blend"
     filepath = bpy.path.abspath(os.path.join(output_dir, filename))
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-
-    # Create a temporary collection to manage exports
-    temp_collection = bpy.data.collections.new("TEMP_EXPORT")
-    bpy.context.scene.collection.children.link(temp_collection)
-
-    # Load existing data if the file exists
-    existing_objects = []
-    target_collection_name = f"{quadrant}_{udim}"
-    target_collection = None
+    # Always create a new temporary scene and collection
     temp_scene = bpy.data.scenes.new(f"TEMP_SCENE_{quadrant}_{udim}")
-
-    if os.path.exists(filepath):
-        # Load existing collection
-        with bpy.data.libraries.load(filepath, link=False) as (data_from, data_to):
-            data_to.collections = [target_collection_name] if target_collection_name in data_from.collections else []
-        
-        # Link existing collection to the temporary collection
-        for coll in data_to.collections:
-            temp_collection.children.link(coll)
-            target_collection = coll
-
-    # Create new collection if none exists
-    if not target_collection:
-        target_collection = bpy.data.collections.new(target_collection_name)
-        temp_collection.children.link(target_collection)
-
-    # Add object to the target collection
-    if obj.name not in target_collection.objects:
-        target_collection.objects.link(obj)
-    
+    target_collection_name = f"{quadrant}_{udim}"
+    target_collection = bpy.data.collections.new(target_collection_name)
     temp_scene.collection.children.link(target_collection)
 
-    # Collect all data blocks to save
-    data_blocks = {target_collection, obj, obj.data}
-    if temp_scene:
-        data_blocks.add(temp_scene)
-    if obj.data:
-        if isinstance(obj.data, bpy.types.Mesh):
-            for mat_slot in obj.material_slots:
+    # Load existing data if file exists
+    if os.path.exists(filepath):
+        with bpy.data.libraries.load(filepath, link=False) as (data_from, data_to):
+            if target_collection_name in data_from.collections:
+                data_to.collections = [target_collection_name]
+
+        # Link loaded collection to scene
+        for coll in data_to.collections:
+            for existing_obj in coll.objects:
+                target_collection.objects.link(existing_obj)
+
+    # Add current object to target collection
+    target_collection.objects.link(obj)
+
+    # Collect all dependencies
+    data_blocks = {temp_scene, target_collection}
+    for ob in target_collection.objects:
+        data_blocks.add(ob)
+        data_blocks.add(ob.data)
+        if isinstance(ob.data, bpy.types.Mesh):
+            for mat_slot in ob.material_slots:
                 if mat_slot.material:
                     data_blocks.add(mat_slot.material)
+                    # Include textures/images
+                    for node in mat_slot.material.node_tree.nodes:
+                        if node.type == 'TEX_IMAGE' and node.image:
+                            data_blocks.add(node.image)
 
-    # Include existing objects from the target collection
-    for existing_obj in target_collection.objects:
-        data_blocks.add(existing_obj)
-        if existing_obj.data:
-            data_blocks.add(existing_obj.data)
-
-    # Write all data blocks to the file
+    # Write to file
     bpy.data.libraries.write(filepath, data_blocks, fake_user=True)
 
-    # temp_collection.objects.unlink(obj)
-
     # Cleanup
-    for coll in temp_scene.collection.children:
-        temp_scene.collection.children.unlink(coll)
-        bpy.data.collections.remove(coll)
-    bpy.context.scene.collection.children.unlink(temp_collection)
-    bpy.data.collections.remove(temp_collection)
     bpy.data.scenes.remove(temp_scene)
+    bpy.data.collections.remove(target_collection)
 
 def main():
     # Process all mesh objects in the scene
     for obj in bpy.context.scene.objects:
-        if obj.type != 'MESH' or not obj.name.startswith(mesh_base_name):
+        if not (obj.type == 'MESH' and obj.name.startswith(mesh_base_name)):
             continue
 
         quadrant, udim = calculate_udim_quadrant(obj)
