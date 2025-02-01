@@ -84,6 +84,9 @@ def export_object(obj, quadrant, udim):
                 if mat_slot.material:
                     data_blocks.add(mat_slot.material)
 
+    # Include the scene in the data blocks to ensure the collection is linked
+    data_blocks.add(bpy.context.scene)
+
     # Write data to blend file
     bpy.data.libraries.write(filepath, data_blocks, fake_user=True)
 
@@ -95,17 +98,6 @@ def export_object(obj, quadrant, udim):
     # Clean up the temporary collection
     bpy.context.scene.collection.children.unlink(export_collection)
     bpy.data.collections.remove(export_collection)
-
-    # Ensure the collection is linked to the view layer in the exported file
-    with bpy.data.libraries.load(filepath) as (data_from, data_to):
-        data_to.collections = [collection_name]
-
-    # Link the collection to the view layer in the exported file
-    bpy.ops.wm.open_mainfile(filepath=filepath)
-    exported_collection = bpy.data.collections.get(collection_name)
-    if exported_collection:
-        bpy.context.scene.collection.children.link(exported_collection)
-    bpy.ops.wm.save_mainfile()
 
 def main():
     # Process all mesh objects in the scene
