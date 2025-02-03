@@ -23,9 +23,11 @@ def add_image_texture_material(mesh, path, mask_name):
     mesh.data.materials.append(material)
 
 
-# Constants
+# UDIM files path
 path = r"E:\Projects\GIS\GIS-WSL\gis-expiremental\Masks\data\Bulit up\4k UDIM"
+# UDIM Image file prefix
 mask_name = "bulitup"
+# Material renaming prefix
 material_name_prefix = "BuiltUp"
 
 # Get all the meshes from the collection
