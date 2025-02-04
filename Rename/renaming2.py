@@ -11,7 +11,6 @@ quadrants = {
 # Dictionary to store the mapping
 udim_mapping = {}
 
-
 def get_udim_name(quadrant, tile_index):
     # Iterate through each quadrant
     start_udim = quadrants[quadrant]["start_udim"]

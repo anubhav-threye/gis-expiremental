@@ -17,22 +17,20 @@ y_step = (y_max - y_min) / y_segments  # 1000.0 units per segment
 # Quadrant remapping: 1→2, 2→4, 3→1, 4→3
 QUADRANT_MAP = {1: 2, 2: 4, 3: 1, 4: 3}
 
+def separation(grid_objects):
+    for obj in grid_objects:
+        # Select and separate
+        bpy.context.view_layer.objects.active = obj
+        obj.select_set(True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.separate(type="LOOSE")
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+
 def rename_sliced_objects():
     print("##################### Rename ######################")
-    # Regex to extract counter, original quadrant, and original UDIM
-    # pattern = re.compile(r'_(\d+)_(\d+)_(\d+)$')
-    
+
     for obj in bpy.context.scene.objects:
-        # if not obj.name.startswith("Var_2_hotel_base") or obj.hide_viewport:
-        #     continue
-        # match = pattern.search(obj.name)
-        # if not match:
-        #     continue  # Skip objects that don't match the pattern
-        
-        # counter = match.group(1)
-        # orig_quadrant = int(match.group(2))
-        # orig_udim = match.group(3)
-        
         # Calculate object's center (using bounding box)
         bbox_corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
         center = sum(bbox_corners, Vector()) / len(bbox_corners)
@@ -85,4 +83,5 @@ def rename_sliced_objects():
         if obj.data:
             obj.data.name = new_name
 
+separation()
 rename_sliced_objects()

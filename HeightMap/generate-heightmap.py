@@ -14,7 +14,17 @@ def normalize(values, norm_range=None):
     return (values - min_val) / (max_val - min_val)
 
 # Main function to generate the height map and save it as an image
-def generate_height_map(obj, resolution_x=512, resolution_y=512, normalization_method="regular", norm_range=None):
+def generate_height_map(
+    obj,
+    resolution_x=512,
+    resolution_y=512,
+    normalization_method="regular",
+    norm_range=None,
+    output_dir="C://",
+):
+    # Apply All Transforms
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+
     if obj and obj.type == 'MESH':
         # Get the mesh data
         mesh = obj.data
@@ -62,7 +72,9 @@ def generate_height_map(obj, resolution_x=512, resolution_y=512, normalization_m
         img = img.transpose(Image.FLIP_TOP_BOTTOM)
 
         # Save the height map image
-        filepath = bpy.path.abspath(r"E:\Projects\GIS\Blosm-HeightMap\Results\vertex_height_map-interpolated-smarty-16bit.png")
+        filepath = bpy.path.abspath(
+            rf"{output_dir}\vertex_height_map-interpolated-smarty-16bit.png"
+        )
         img.save(filepath)
 
         print(f"Height map saved at {filepath}")
@@ -71,4 +83,13 @@ def generate_height_map(obj, resolution_x=512, resolution_y=512, normalization_m
 
 # Call the function
 obj = bpy.context.object  # Get the active object
-generate_height_map(obj, resolution_x=4096, resolution_y=4096, normalization_method="regular", norm_range={'from': None, 'to': None})
+output_dir = "E:\Projects\GIS\Blosm-HeightMap\Results"
+
+generate_height_map(
+    obj,
+    resolution_x=4096,
+    resolution_y=4096,
+    normalization_method="regular",
+    norm_range={"from": None, "to": None},
+    output_dir=output_dir,
+)
