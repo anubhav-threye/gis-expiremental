@@ -6,7 +6,7 @@ import os
 # -------------------------------------------
 # General Scene Settings
 # -------------------------------------------
-def scene_setup(bake_type="DIFFUSE"):
+def scene_setup():
     """
     Sets up the scene for a diffuse bake.
 
@@ -17,24 +17,95 @@ def scene_setup(bake_type="DIFFUSE"):
     """
     scene = bpy.context.scene
     # Render Settings
-    scene.render.engine = "CYCLES"
-    scene.cycles.device = "GPU"
-    # Bake Settings
-    scene.cycles.bake_type = bake_type
-    scene.render.bake.use_pass_color = True
-    scene.render.bake.use_pass_direct = False
-    scene.render.bake.use_pass_indirect = False
-    scene.render.bake.margin = 0
-    scene.render.bake.use_clear = True
+    scene.render.engine = "CYCLES"  # Render Engine
 
-    # Configure passes based on bake type
-    # if bake_type == "DIFFUSE":
-    #     scene.render.bake.use_pass_direct = False
-    #     scene.render.bake.use_pass_indirect = False
-    # elif bake_type == "NORMAL":
-    #     scene.render.bake.use_pass_normal = True
-    # elif bake_type == "ROUGHNESS":
-    #     scene.render.bake.use_pass_glossy = True
+    cycles = scene.cycles  # Get Cycles
+    render = scene.render  # Get Render
+    view = scene.view_settings  # Get View Settings
+    display = scene.display_settings  # Get Display Settings
+
+    cycles.device = "GPU"  # Device -> GPU Compute
+
+    # ------------- SAMPLING -------------
+    # Viewport Sampling
+    cycles.preview_adaptive_threshold = 0.1  # Noise Threshold
+    cycles.preview_samples = 25  # Max Samples
+    cycles.preview_adaptive_min_samples = 0  # Min Samples
+    cycles.use_preview_denoising = False  # Denoising
+
+    # Render Sampling
+    cycles.adaptive_threshold = 0.01  # Noise Threshold
+    cycles.samples = 5  # Max Samples
+    cycles.adaptive_min_samples = 0  # Min Samples
+    cycles.time_limit = 0  # Time Limit
+    cycles.use_denoising = False  # Denoising
+
+    # ------------- LIGHT PATHS -------------
+    # Max Bounces
+    cycles.max_bounces = 12  # Total
+    cycles.diffuse_bounces = 4  # Diffuse
+    cycles.glossy_bounces = 4  # Glossy
+    cycles.transmission_bounces = 12  # Transmission
+    cycles.volume_bounces = 0  # Volume
+    cycles.transparent_max_bounces = 8  # Transparent
+
+    # Clamping
+    cycles.sample_clamp_direct = 0.0  # Direct Light
+    cycles.sample_clamp_indirect = 10.0  # Indirect Light
+
+    # Caustics
+    cycles.blur_glossy = 1.0  # Filter Glossy
+    cycles.caustics_reflective = False  # Caustics Reflective
+    cycles.caustics_refractive = False  # Caustics Refractive
+    cycles.use_fast_gi = False  # Fast GI Approximation
+
+    # ------------- SIMPLIFY -------------
+    # Viewport Simplify
+    render.use_simplify = True  # Simplify ON
+    render.simplify_subdivision = 6  # Max Subdivision
+    render.simplify_child_particles = 1  # Child Particles
+    cycles.texture_limit = "512"  # Texture Limit
+    render.simplify_volumes = 1.0  # Volume Resolution
+    render.use_simplify_normals = False  # Normals
+
+    # Render Simplify
+    render.simplify_subdivision_render = 6  # Max Subdivision
+    render.simplify_child_particles_render = 1  # Child Particles
+    cycles.texture_limit_render = "OFF"  # Texture Limit
+    render.simplify_gpencil = False  # Grease Pencil
+
+    # ------------- COLOR MANAGEMENT -------------
+    display.display_device = "sRGB"  # Display Device
+    view.view_transform = "Filmic"  # View Transform
+    view.look = "Very High Contrast"  # Look
+    view.exposure = 1.0  # Exposure
+    view.gamma = 1.0  # Gamma
+    scene.sequencer_colorspace_settings.name = "sRGB"  # Sequencer
+    view.use_curve_mapping = False  # Use Curve
+
+
+def bake_settings(bake_type="DIFFUSE"):
+    scene = bpy.context.scene
+
+    cycles = scene.cycles  # Get Cycles
+    bake = scene.render.bake  # Get Bake
+
+    # ------------- Bake Settings -------------
+    cycles.bake_type = bake_type  # Bake Type
+
+    # Contributions
+    bake.use_pass_direct = False  # Direct
+    bake.use_pass_color = True  # Color
+    bake.use_pass_indirect = False  # Indirect
+    bake.use_selected_to_active = False  # Selective To Active
+
+    # Output
+    bake.target = "IMAGE_TEXTURES"  # Target
+    bake.use_clear = True  # Clear Image
+
+    # Margin
+    bake.margin_type = "ADJACENT_FACES"  # Type
+    bake.margin = 0  # Size
 
 
 # -------------------------------------------
@@ -89,7 +160,7 @@ def create_image_tile(udim_name, texture_node, bake_suffix):
         name=image_name,
         width=RESOLUTION,
         height=RESOLUTION,
-        alpha=True,
+        alpha=False,
         float_buffer=False,
         tiled=True,
     )
@@ -114,28 +185,13 @@ def create_image_tile(udim_name, texture_node, bake_suffix):
         return None
 
 
-def setup_material_nodes(material, bake_type):
+def setup_material_nodes(material):
     nodes = material.node_tree.nodes
-    links = material.node_tree.links
-
-    # Find Principled BSDF
-    # principled = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
-    # if not principled:
-    #     principled = nodes.new("ShaderNodeBsdfPrincipled")
+    _links = material.node_tree.links
 
     # Create temporary nodes for baking
     texture_node = nodes.new("ShaderNodeTexImage")
     nodes.active = texture_node
-
-    # if bake_type == "NORMAL":
-    #     normal_node = nodes.new("ShaderNodeNormalMap")
-    #     links.new(texture_node.outputs["Color"], normal_node.inputs["Color"])
-    #     links.new(normal_node.outputs["Normal"], principled.inputs["Normal"])
-    #     return texture_node, normal_node
-    # elif bake_type == "ROUGHNESS":
-    #     links.new(texture_node.outputs["Color"], principled.inputs["Roughness"])
-    # else:  # DIFFUSE
-    #     links.new(texture_node.outputs["Color"], principled.inputs["Base Color"])
 
     return texture_node, None
 
@@ -152,7 +208,7 @@ def create_image_texture(obj, udim_name):
 
     for bake_type, bake_suffix in BAKE_TYPES.items():
         # Setup nodes for current bake type
-        texture_node, normal_node = setup_material_nodes(material, bake_type)
+        texture_node, normal_node = setup_material_nodes(material)
         nodes_list.append(texture_node)
         if normal_node:
             nodes_list.append(normal_node)
@@ -161,7 +217,7 @@ def create_image_texture(obj, udim_name):
         image = create_image_tile(udim_name, texture_node, bake_suffix)
 
         if image:
-            scene_setup(bake_type)
+            bake_settings(bake_type)
             init_bake(image, bake_type, bake_suffix, udim_name)
 
         # Cleanup nodes
