@@ -19,6 +19,10 @@ y_segments = 16
 x_step = (x_max - x_min) / x_segments  # 1000 units per tile
 y_step = (y_max - y_min) / y_segments
 
+# Create temporary collection
+merged_col = bpy.data.collections.new(f"Merged_{x_segments/4}X{y_segments/4}")
+bpy.context.scene.collection.children.link(merged_col)
+
 def get_tile_coordinates(obj):
     """Calculate original grid coordinates from object's bounding box"""
     bbox_corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
@@ -27,63 +31,95 @@ def get_tile_coordinates(obj):
     j = int((center.y - y_min) // y_step)
     return max(0, min(i, x_segments-1)), max(0, min(j, y_segments-1))
 
-def merge_tile_group(group_objects, parent_i, parent_j):
-    """Merge 4 tiles into a single mesh with vertex welding"""
-    bm = bmesh.new()
-    
-    # Collect geometry from all tiles
-    for obj in group_objects:
-        temp_bm = bmesh.new()
-        temp_bm.from_mesh(obj.data)
-        temp_bm.transform(obj.matrix_world)
-        bm.from_mesh(obj.data)
-        temp_bm.free()
-    
-    # Weld vertices and clean up
-    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.01)
-    
-    # Create new object
-    me = bpy.data.meshes.new(f"{TILE_BASE_NAME}_L1_{parent_i}_{parent_j}")
-    bm.to_mesh(me)
-    ob = bpy.data.objects.new(me.name, me)
-    bpy.context.collection.objects.link(ob)
-    return ob
+def merge_tiles_group(group_objects, parent_i, parent_j, quadrant):
+    """Merge objects using Blender's join operator while keeping temp collection"""
 
+    
+    # Copy objects to temporary collection
+    copies = []
+    for obj in group_objects:
+        copy = obj.copy()
+        copy.data = obj.data.copy()
+        merged_col.objects.link(copy)
+        copies.append(copy)
+    
+    # Select and join copies
+    bpy.ops.object.select_all(action='DESELECT')
+    for copy in copies:
+        copy.select_set(True)
+    bpy.context.view_layer.objects.active = copies[0]
+    
+    bpy.ops.object.join()
+    merged_obj = bpy.context.active_object
+    merged_obj.name = f"{TILE_BASE_NAME}_L1_{parent_i:02d}_{parent_j:02d}"
+    
+    # Apply transformations (rotation/scale) but keep world position
+    bpy.ops.object.select_all(action='DESELECT')
+    merged_obj.select_set(True)
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+    
+    # Weld vertices
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.remove_doubles(threshold=0.001)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    # Link merged object to main collection
+    # bpy.context.scene.collection.objects.link(merged_obj)
+    
+    # Unlink from temp collection (optional)
+    # temp_col.objects.unlink(merged_obj)
+
+    # Store metadata
+    child_names = [obj.name for obj in group_objects]
+    merged_obj["child_tiles"] = ",".join(child_names)
+    merged_obj["quadrant"] = str(quadrant)
+
+    return merged_obj
 def calculate_bounding_volume(obj):
-    """Calculate 3D Tiles bounding box in WGS84 (simplified example)"""
-    local_bbox = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
-    min_point = Vector((min(v.x for v in local_bbox),
-                       min(v.y for v in local_bbox),
-                       min(v.z for v in local_bbox)))
-    max_point = Vector((max(v.x for v in local_bbox),
-                       max(v.y for v in local_bbox),
-                       max(v.z for v in local_bbox)))
+    """Calculate bounding volume in world coordinates"""
+    world_bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+    min_corner = Vector((
+        min(v.x for v in world_bbox),
+        min(v.y for v in world_bbox),
+        min(v.z for v in world_bbox)
+    ))
+    max_corner = Vector((
+        max(v.x for v in world_bbox),
+        max(v.y for v in world_bbox),
+        max(v.z for v in world_bbox)
+    ))
     
     return {
         "box": [
-            (min_point.x + max_point.x)/2,  # center x
-            (min_point.y + max_point.y)/2,  # center y
-            (min_point.z + max_point.z)/2,  # center z
-            (max_point.x - min_point.x)/2,  # x half-length
-            0, 0,                           # y orientation
-            0, 0,                           # z orientation
-            0, (max_point.y - min_point.y)/2,  # y half-length
-            0, 0,                           # z orientation
-            0, 0, (max_point.z - min_point.z)/2  # z half-length
+            (min_corner.x + max_corner.x)/2,  # center x
+            (min_corner.y + max_corner.y)/2,  # center y
+            (min_corner.z + max_corner.z)/2,  # center z
+            (max_corner.x - min_corner.x)/2, 0, 0,  # x half-length
+            0, (max_corner.y - min_corner.y)/2, 0,   # y half-length
+            0, 0, (max_corner.z - min_corner.z)/2    # z half-length
         ]
     }
 
 def export_glb(obj, path):
-    """Export single object as GLB"""
-    original_name = obj.name
-    obj.name = f"{TILE_BASE_NAME}_{obj.name.split('_')[-2]}_{obj.name.split('_')[-1]}"
+    """Export GLB with proper transform handling"""
+    # Reset location (keep geometry in place)
+    original_location = obj.location.copy()
+    obj.location = (0, 0, 0)
+    
+    # Select only target object
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    
+    # Export
     bpy.ops.export_scene.gltf(
-        filepath=os.path.join(path, obj.name + ".glb"),
+        filepath=os.path.join(path, f"{obj.name}.glb"),
         use_selection=True,
-        export_format='GLB'
+        export_format='GLB',
+        export_yup=True
     )
-    obj.name = original_name
-
+    
+    # Restore original location
+    obj.location = original_location
 def generate_tileset(tile_groups):
     """Generate 3D Tiles compatible JSON hierarchy"""
     tileset = {
@@ -117,55 +153,132 @@ def generate_tileset(tile_groups):
 
     return tileset
 
+def save_merged_collection():
+    """Save the merged collection to a new blend file"""
+    # Ensure the collection exists
+    if not merged_col:
+        print("No merged collection found")
+        return
+    temp_scene = bpy.data.scenes.new(f"TEMP_SCENE")
+    temp_scene.collection.children.link(merged_col)
+
+    file_name = rf"{merged_col.name}.blend"
+    # Create output path
+    output_path = os.path.join(EXPORT_PATH, file_name)
+
+    # Collect all data blocks to save
+    data_blocks = {temp_scene, merged_col}
+    
+    # Add all objects in the collection and their dependencies
+    for obj in merged_col.objects:
+        data_blocks.add(obj)
+        data_blocks.add(obj.data)
+        
+        # # Add materials and textures
+        # for mat in obj.data.materials:
+        #     data_blocks.add(mat)
+        #     for tex in mat.texture_slots:
+        #         if tex and tex.texture:
+        #             data_blocks.add(tex.texture)
+        if isinstance(obj.data, bpy.types.Mesh):
+            for mat_slot in obj.material_slots:
+                if mat_slot.material:
+                    data_blocks.add(mat_slot.material)
+                    # Include textures/images
+                    for node in mat_slot.material.node_tree.nodes:
+                        if node.type == 'TEX_IMAGE' and node.image:
+                            data_blocks.add(node.image)
+
+    # Save to blend file
+    bpy.data.libraries.write(
+        filepath=output_path,
+        datablocks=data_blocks,
+        fake_user=False
+    )
+    bpy.data.scenes.remove(temp_scene)
+    bpy.data.collections.remove(merged_col)
+    
+    print(f"Saved merged collection to {output_path}")
+
 def process_tiles():
-    # Create export directory
     export_dir = bpy.path.abspath(EXPORT_PATH)
     os.makedirs(export_dir, exist_ok=True)
-
-    # Organize tiles into groups
-    tile_groups = {}
     
-    # Collect all terrain tile objects
+    # Get all terrain tiles (assuming they're named correctly)
     terrain_tiles = [obj for obj in bpy.data.objects]
-
-    # Group tiles into 2x2 parent groups
+    
+    # Create parent-child structure
+    tile_hierarchy = {}
     for tile in terrain_tiles:
         i, j = get_tile_coordinates(tile)
+        # calculate quadrant
+        if i < 8 and j < 8:
+            quadrant = 1
+        elif i < 8 and j >= 8:
+            quadrant = 2
+        elif i >= 8 and j < 8:
+            quadrant = 3
+        else:
+            quadrant = 4
         parent_i = i // 2
         parent_j = j // 2
         
-        if (parent_i, parent_j) not in tile_groups:
-            tile_groups[(parent_i, parent_j)] = {
+        key = (parent_i, parent_j)
+        if key not in tile_hierarchy:
+            tile_hierarchy[key] = {
                 'children': [],
                 'parent': None
             }
-        tile_groups[(parent_i, parent_j)]['children'].append(tile)
+        tile_hierarchy[key]['children'].append(tile)
+    
 
-    # Merge groups and create parent tiles
-    for (pi, pj), data in tile_groups.items():
+    # Merge and export
+    for (pi, pj), data in tile_hierarchy.items():
         if len(data['children']) == 4:
-            merged = merge_tile_group(data['children'], pi, pj)
-            data['parent'] = merged
-        else:
-            print(f"Warning: Group {pi}-{pj} has {len(data['children'])} tiles")
-
-    # Export all GLBs
-    for (pi, pj), data in tile_groups.items():
-        if data['parent']:
-            export_glb(data['parent'], export_dir)
-        for child in data['children']:
-            export_glb(child, export_dir)
-
+            # Merge group
+            parent = merge_tiles_group(data['children'], pi, pj, quadrant)
+            data['parent'] = parent
+            
+            # # Export children
+            # for child in data['children']:
+            #     export_glb(child, export_dir)
+            
+            # # Export parent
+            # export_glb(parent, export_dir)
+            
+            # Position parent at children's center
+            parent.location = sum((obj.location for obj in data['children']), Vector()) / 4
+    
     # Generate JSON hierarchy
-    tileset = generate_tileset(tile_groups)
-    with open(os.path.join(export_dir, "tileset.json"), 'w') as f:
+    tileset = {
+        "asset": {"version": "1.0"},
+        "geometricError": 2048,
+        "root": {
+            "children": []
+        }
+    }
+    
+    for (pi, pj), data in tile_hierarchy.items():
+        if data['parent']:
+            parent_entry = {
+                "boundingVolume": calculate_bounding_volume(data['parent']),
+                "geometricError": 512,
+                "content": {"uri": f"{data['parent'].name}.glb"},
+                "children": [
+                    {
+                        "boundingVolume": calculate_bounding_volume(child),
+                        "geometricError": 128,
+                        "content": {"uri": f"{child.name}.glb"}
+                    } for child in data['children']
+                ]
+            }
+            tileset["root"]["children"].append(parent_entry)
+    file_name = rf"{merged_col.name}.json"
+    with open(os.path.join(export_dir, file_name), 'w') as f:
         json.dump(tileset, f, indent=2)
-
-    # Cleanup original tiles (optional)
-    # for tile in terrain_tiles:
-    #     bpy.data.objects.remove(tile)
-
-    print(f"Exported {len(tile_groups)} parent tiles and {len(terrain_tiles)} child tiles")
-
+    
+    print(f"Processed {len(tile_hierarchy)} parent tiles")
+    # After generating JSON and processing tiles
+    save_merged_collection() 
 # Run the processing
 process_tiles()

@@ -6,190 +6,204 @@ from mathutils import Vector
 # Configuration
 EXPORT_PATH = r"C:\Users\THREE\Desktop\Blosm\3dtiles"
 TILE_BASE_NAME = "Terrain"
+MAIN_TILESET_JSON = os.path.join(EXPORT_PATH, "tileset.json")
+
+# World parameters
 QUADRANTS = {
-    1: {"x_range": (-8000, 0), "y_range": (-8000, 0)},
-    2: {"x_range": (-8000, 0), "y_range": (0, 8000)},
-    3: {"x_range": (0, 8000), "y_range": (-8000, 0)},
-    4: {"x_range": (0, 8000), "y_range": (0, 8000)}
+    1: {"x_range": (-7999.99951171875, 0), "y_range": (-8000.00048828125, 0)},
+    2: {"x_range": (-8000.0, 0), "y_range": (0, 8000.0)},
+    3: {"x_range": (0, 8000.0), "y_range": (-8000.0, 0)},
+    4: {"x_range": (0, 8000.0), "y_range": (0, 8000.0)}
 }
 x_segments = 16
 y_segments = 16
-x_step = (8000.0 - -8000.0) / x_segments  # 1000 units per tile
-y_step = (8000.0 - 8000.0) / y_segments
+x_step = (8000.0 - -7999.99951171875) / x_segments  # 1000 units per tile
+y_step = (8000.0 - -8000.00048828125) / y_segments
 
 TILE_SIZE = x_step
-GRID_SIZE = 8
+WORLD_SIZE = 16000  # (-8000 to 8000 in both axes)
+QUADRANT_SIZE = WORLD_SIZE // 2
+TILE_COUNT = 8  # 8x8 tiles per quadrant
+TILE_SIZE = QUADRANT_SIZE // TILE_COUNT
 
+temp_cols = []
+# Create temporary collections
+for q, ranges in QUADRANTS.items():
+    col = bpy.data.collections.new(f"Temp_Merge_Q{q}")
+    temp_cols.append(col)
+    bpy.context.scene.collection.children.link(col)
 def get_quadrant_and_udim(obj):
     """Calculate quadrant and UDIM index from object location"""
-    center = obj.matrix_world @ Vector(obj.bound_box[0]) + obj.matrix_world @ Vector(obj.bound_box[6])
-    center /= 2
+    bb_world = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    center = sum(bb_world, Vector()) / len(bb_world)
     
+    # Determine quadrant
     for q, ranges in QUADRANTS.items():
         if (ranges["x_range"][0] <= center.x <= ranges["x_range"][1] and
             ranges["y_range"][0] <= center.y <= ranges["y_range"][1]):
             
             local_x = center.x - ranges["x_range"][0]
             local_y = center.y - ranges["y_range"][0]
-            
             udim_x = int(local_x // TILE_SIZE)
             udim_y = int(local_y // TILE_SIZE)
             
             udim = 1001 + (udim_y * 10) + udim_x
             
             return q, udim
+    
     return None, None
 
-def merge_tiles_group(group_objects, parent_i, parent_j, quadrant):
-    """Merge objects using temporary collection"""
-    temp_col = bpy.data.collections.new(f"Temp_Quadrant_{quadrant}")
-    bpy.context.scene.collection.children.link(temp_col)
+def merge_tile_group(group, quadrant):
+    """Merge 4 tiles and store metadata in custom properties"""
+    col = temp_cols[quadrant -1]
     
+    # Copy and join objects
     copies = []
-    for obj in group_objects:
+    for obj in group:
         copy = obj.copy()
         copy.data = obj.data.copy()
-        temp_col.objects.link(copy)
+        col.objects.link(copy)
         copies.append(copy)
     
     bpy.ops.object.select_all(action='DESELECT')
     for copy in copies:
         copy.select_set(True)
     bpy.context.view_layer.objects.active = copies[0]
-    
     bpy.ops.object.join()
+    
     merged_obj = bpy.context.active_object
-    merged_obj.name = f"{TILE_BASE_NAME}_{quadrant}_L1_{parent_i:02d}_{parent_j:02d}"
+    merged_obj.name = f"{TILE_BASE_NAME}_Q{quadrant}_L1_{merged_obj.name.split('_')[-1]}"
     
-    bpy.ops.object.select_all(action='DESELECT')
-    merged_obj.select_set(True)
-    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+    # Apply transforms and weld
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.remove_doubles(threshold=0.001)
+    bpy.ops.object.mode_set(mode='OBJECT')
     
-    # Cleanup temporary collection
-    bpy.data.collections.remove(temp_col)
+    # Store metadata
+    child_names = [obj.name for obj in group]
+    merged_obj["child_tiles"] = ",".join(child_names)
+    merged_obj["quadrant"] = quadrant
+    merged_obj["lod_level"] = 1
+    
     
     return merged_obj
 
-def save_quadrant_blend(quadrant, objects, metadata):
-    """Save quadrant data to blend file with metadata"""
-    temp_scene = bpy.data.scenes.new(f"Quadrant_{quadrant}")
-    temp_col = bpy.data.collections.new(f"{quadrant}_Collection")
-    temp_scene.collection.children.link(temp_col)
-
-    # Link objects and collect dependencies
-    data_blocks = {temp_scene, temp_col}
-    for obj in objects:
-        temp_col.objects.link(obj)
-        data_blocks.add(obj)
-        data_blocks.add(obj.data)
-        
-        if isinstance(obj.data, bpy.types.Mesh):
-            for mat_slot in obj.material_slots:
-                if mat_slot.material:
-                    data_blocks.add(mat_slot.material)
-                    for node in mat_slot.material.node_tree.nodes:
-                        if node.type == 'TEX_IMAGE' and node.image:
-                            data_blocks.add(node.image)
-
-    # Store metadata in scene properties
-    temp_scene["quadrant_metadata"] = json.dumps(metadata)
+def export_quadrant(quadrant):
+    """Export quadrant to separate blend file with custom properties"""
+    quadrant_objects = [obj for obj in bpy.data.objects 
+                       if obj.get("quadrant") == quadrant]
     
-    # Export path
-    os.makedirs(EXPORT_PATH, exist_ok=True)
-    output_path = os.path.join(EXPORT_PATH, f"quadrant_{quadrant}.blend")
+    # Create dedicated collection
+    quadrant_col = bpy.data.collections.new(f"Quadrant_{quadrant}")
+    bpy.context.scene.collection.children.link(quadrant_col)
     
-    # Write blend file
-    bpy.data.libraries.write(
-        filepath=output_path,
-        datablocks=data_blocks,
-        fake_user=False
-    )
+    # Add objects to collection
+    for obj in quadrant_objects:
+        try:
+            quadrant_col.objects.link(obj)
+            bpy.context.scene.collection.objects.unlink(obj)
+        except:
+            pass
+    
+    # Save blend file
+    quadrant_path = os.path.join(EXPORT_PATH, f"quadrant_{quadrant}.blend")
+    bpy.data.libraries.write(quadrant_path, {quadrant_col}, fake_user=True)
     
     # Cleanup
-    bpy.data.scenes.remove(temp_scene)
-    bpy.data.collections.remove(temp_col)
+    bpy.data.collections.remove(quadrant_col)
+    return len(quadrant_objects)
 
-def calculate_bounding_volume(obj):
-    """Calculate bounding volume for 3D Tiles"""
-    world_bbox = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
-    min_corner = Vector((
-        min(v.x for v in world_bbox),
-        min(v.y for v in world_bbox),
-        min(v.z for v in world_bbox)
-    ))
-    max_corner = Vector((
-        max(v.x for v in world_bbox),
-        max(v.y for v in world_bbox),
-        max(v.z for v in world_bbox)
-    ))
+def generate_tileset_json():
+    """Generate main 3D Tiles JSON referencing quadrant files"""
+    tileset = {
+        "asset": {"version": "1.0"},
+        "geometricError": WORLD_SIZE,
+        "root": {
+            "boundingVolume": {
+                "region": [
+                    -1.319700, 0.698858,  # WGS84 bounds (example)
+                    -1.319400, 0.699200,
+                    0, 1500
+                ]
+            },
+            "geometricError": WORLD_SIZE/2,
+            "refine": "ADD",
+            "children": []
+        }
+    }
     
+    # Add quadrants as root children
+    for q in [1, 2, 3, 4]:
+        quadrant_entry = {
+            "boundingVolume": calculate_quadrant_volume(q),
+            "geometricError": QUADRANT_SIZE,
+            "content": {
+                "uri": f"quadrant_{q}.blend",
+                "type": "blend"
+            },
+            "children": []
+        }
+        tileset["root"]["children"].append(quadrant_entry)
+    
+    # Save tileset
+    with open(MAIN_TILESET_JSON, 'w') as f:
+        json.dump(tileset, f, indent=2)
+
+def calculate_quadrant_volume(quadrant):
+    """Calculate bounding region for quadrant in WGS84"""
+    # Example coordinates - replace with your actual geo-bounds
+    west = -1.319700 + (0.0001 * (quadrant-1) % 2)
+    south = 0.698858 + (0.0001 * (quadrant-1) // 2)
     return {
-        "box": [
-            (min_corner.x + max_corner.x)/2,
-            (min_corner.y + max_corner.y)/2,
-            (min_corner.z + max_corner.z)/2,
-            (max_corner.x - min_corner.x)/2, 0, 0,
-            0, (max_corner.y - min_corner.y)/2, 0,
-            0, 0, (max_corner.z - min_corner.z)/2
+        "region": [
+            west, south,
+            west + 0.0002, south + 0.0002,
+            0, 1500
         ]
     }
 
-def process_quadrant(quadrant):
-    """Process and export a single quadrant"""
-    quadrant_objects = [obj for obj in bpy.data.objects 
-                       if get_quadrant_and_udim(obj)[0] == quadrant]
+def process_all_quadrants():
+    """Main processing function"""
+    # Process all tiles
+    all_tiles = [obj for obj in bpy.data.objects]
     
-    metadata = {
-        "quadrant": quadrant,
-        "tile_size": TILE_SIZE,
-        "levels": {
-            "L0": {"tiles": [], "bounding_volume": None},
-            "L1": {"tiles": [], "bounding_volume": None}
-        }
-    }
-
-    # Process L0 tiles
-    l0_objects = []
-    for obj in quadrant_objects:
-        q, udim = get_quadrant_and_udim(obj)
-        obj.name = f"{TILE_BASE_NAME}_{q}_{udim}"
-        l0_objects.append(obj)
-        metadata["levels"]["L0"]["tiles"].append({
-            "name": obj.name,
-            "udim": udim,
-            "bounding_volume": calculate_bounding_volume(obj)
-        })
-
-    # Process L1 tiles
-    l1_objects = []
-    for i in range(0, GRID_SIZE, 2):
-        for j in range(0, GRID_SIZE, 2):
-            group = [obj for obj in quadrant_objects 
-                    if (i <= (get_quadrant_and_udim(obj)[1] - 1001) % 10 < i+2) and
-                       (j <= (get_quadrant_and_udim(obj)[1] - 1001) // 10 < j+2)]
-            
-            if len(group) == 4:
-                merged = merge_tiles_group(group, i, j, quadrant)
-                l1_objects.append(merged)
-                metadata["levels"]["L1"]["tiles"].append({
-                    "name": merged.name,
-                    "children": [obj.name for obj in group],
-                    "bounding_volume": calculate_bounding_volume(merged)
-                })
-
-    # Calculate quadrant bounding volume
-    metadata["levels"]["L0"]["bounding_volume"] = QUADRANTS[quadrant]
-    metadata["levels"]["L1"]["bounding_volume"] = QUADRANTS[quadrant]
-
-    # Save quadrant blend with metadata
-    save_quadrant_blend(quadrant, l0_objects + l1_objects, metadata)
+    # Organize by quadrant
+    quadrant_map = {1: [], 2: [], 3: [], 4: []}
+    for tile in all_tiles:
+        quadrant, udim = get_quadrant_and_udim(tile)
+        tile.name = f"{TILE_BASE_NAME}_Q{quadrant}_{udim}"
+        tile["quadrant"] = quadrant
+        tile["udim"] = udim
+        tile["lod_level"] = 0
+        quadrant_map[quadrant].append(tile)
     
-    # Cleanup merged objects
-    for obj in l1_objects:
-        bpy.data.objects.remove(obj, do_unlink=True)
+    # Process each quadrant
+    for quadrant in [1, 2, 3, 4]:
+        # Merge tiles into 4x4 groups (LOD 1)
+        tiles = quadrant_map[quadrant]
+        for i in range(0, TILE_COUNT, 2):
+            for j in range(0, TILE_COUNT, 2):
+                # Get 2x2 tile group
+                group = [t for t in tiles 
+                        if (i <= (t["udim"] - 1001) % 10 < i+2) and
+                           (j <= (t["udim"] - 1001) // 10 < j+2)]
+                
+                if len(group) == 4:
+                    merge_tile_group(group, quadrant)
+        
+        # Export quadrant
+        count = export_quadrant(quadrant)
+        print(f"Exported quadrant {quadrant} with {count} objects")
+    
+    # Generate main tileset
+    generate_tileset_json()
+    # Cleanup temporary collection
+    # for q, ranges in QUADRANTS.items():
+    #     bpy.data.collections.remove(temp_cols[q - 1])
 
-# Process all quadrants
-for quadrant in QUADRANTS:
-    process_quadrant(quadrant)
+    print(f"Generated main tileset at {MAIN_TILESET_JSON}")
 
-print("All quadrants processed successfully")
+# Run the processing
+process_all_quadrants()
