@@ -2,6 +2,13 @@ import bpy, bmesh
 from bpy import context
 from mathutils import Vector
 
+terrain_bbox = (
+    Vector((-7999.9990234375, -8000.00048828125, 1.1619997024536133)),
+    Vector((8000.0, -8000.00048828125, 1.1619997024536133)),
+    Vector((-7999.9990234375, 8000.0, 1.1619997024536133)),
+    Vector((-7999.9990234375, -8000.00048828125, 1516.095703125)),
+)
+
 
 # bounding box helper methods
 def bbox(ob):
@@ -40,7 +47,8 @@ ob = context.object
 me = ob.data
 bm.from_mesh(me)
 
-o, x, y, z = bbox_axes(ob)
+# o, x, y, z = bbox_axes(ob)
+o, x, y, z = terrain_bbox
 
 x_segments = 16
 y_segments = 16
