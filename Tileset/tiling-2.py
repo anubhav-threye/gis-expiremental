@@ -5,9 +5,8 @@ import bmesh
 from mathutils import Vector
 
 # Configuration
-EXPORT_PATH = r"C:\Users\THREE\Desktop\Blosm\3dtiles"  # Blender relative export path
+EXPORT_PATH = r"E:\Projects\GIS\GIS-WSL\gis-expiremental\data\3d_tiles"  # Blender relative export path
 TILE_BASE_NAME = "Terrain"
-JSON_PATH = r"C:\Users\THREE\Desktop\Blosm"
 
 # Terrain grid parameters (adjusted for 8x8 grid -> 64 tiles)
 x_min = -7999.99951171875
@@ -120,6 +119,7 @@ def export_glb(obj, path):
     
     # Restore original location
     obj.location = original_location
+
 def generate_tileset(tile_groups):
     """Generate 3D Tiles compatible JSON hierarchy"""
     tileset = {
@@ -205,7 +205,7 @@ def process_tiles():
     os.makedirs(export_dir, exist_ok=True)
     
     # Get all terrain tiles (assuming they're named correctly)
-    terrain_tiles = [obj for obj in bpy.data.objects]
+    terrain_tiles = [obj for obj in bpy.context.selected_objects]
     
     # Create parent-child structure
     tile_hierarchy = {}
